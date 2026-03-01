@@ -7,70 +7,67 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"time"
 )
 
-type TranslationResponse struct {
+// TranscriptionResponse holds the STT result from Groq.
+type TranscriptionResponse struct {
 	Text string `json:"text"`
 }
 
-// TranscribeAudio streams the given io.Reader directly to Groq's STT engine
+// TranscribeAudio streams audio to Groq's Whisper STT and returns the transcribed text.
+// Uses io.Pipe for zero-copy streaming — the audio bytes flow directly from the
+// HTTP download into the Groq upload without buffering the entire file in memory.
 func TranscribeAudio(audioReader io.Reader) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GROQ_API_KEY is not set")
 	}
 
+	// Build multipart form body via pipe (zero-copy)
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
 
-	// Stream constructing in goroutine
 	go func() {
 		defer pw.Close()
 		defer writer.Close()
 
 		part, err := writer.CreateFormFile("file", "audio.ogg")
 		if err != nil {
-			pw.CloseWithError(fmt.Errorf("failed to create groq form file: %w", err))
+			pw.CloseWithError(err)
 			return
 		}
-
 		if _, err := io.Copy(part, audioReader); err != nil {
-			pw.CloseWithError(fmt.Errorf("failed to copy audio to groq stream: %w", err))
+			pw.CloseWithError(err)
 			return
 		}
-
-		// Write model field
-		if err := writer.WriteField("model", "whisper-large-v3"); err != nil {
-			pw.CloseWithError(fmt.Errorf("failed to write model field: %w", err))
-			return
-		}
+		writer.WriteField("model", "whisper-large-v3")
 	}()
 
-	url := "https://api.groq.com/openai/v1/audio/transcriptions"
-	req, err := http.NewRequest(http.MethodPost, url, pr)
+	req, err := http.NewRequest(http.MethodPost,
+		"https://api.groq.com/openai/v1/audio/transcriptions", pr)
 	if err != nil {
-		return "", fmt.Errorf("failed to create groq request: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
-
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to call groq: %w", err)
+		return "", fmt.Errorf("groq request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("groq api error %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("groq error %d: %s", resp.StatusCode, string(body))
 	}
 
-	var transResp TranslationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&transResp); err != nil {
-		return "", fmt.Errorf("failed to decode groq response: %w", err)
+	var result TranscriptionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return transResp.Text, nil
+	return result.Text, nil
 }

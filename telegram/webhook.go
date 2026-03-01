@@ -1,17 +1,18 @@
 package telegram
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"time"
 
-	"github.com/user/islahmebot/gemini"
-	"github.com/user/islahmebot/groq"
+	"github.com/th3204965/islahmebot/gemini"
+	"github.com/th3204965/islahmebot/groq"
 )
 
-// HandleWebhook is the HTTP handler for Telegram Webhooks and Cloud Function entry
+// HandleWebhook is the HTTP handler for Telegram webhooks.
 func HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -25,64 +26,90 @@ func HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We only care about voice messages
 	if update.Message == nil || update.Message.Voice == nil {
-		// Respond 200 OK so Telegram doesn't retry
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	go processVoiceMessage(update.Message)
-
-	// Acknowledge the webhook immediately so Telegram doesn't timeout
+	processVoiceMessage(update.Message)
 	w.WriteHeader(http.StatusOK)
 }
 
 func processVoiceMessage(msg *Message) {
-	fileID := msg.Voice.FileID
 	chatID := msg.Chat.ID
+	tag := fmt.Sprintf("[chat:%d]", chatID)
 
-	// 1: Fetch the temporary file URL from Telegram
-	fileURL, err := GetFileURL(fileID)
+	// Start continuous indicator — stays on until we're done
+	indicator := StartTypingLoop(chatID, "record_voice")
+	defer indicator.Stop()
+
+	// 1: Get file download URL
+	fileURL, err := GetFileURL(msg.Voice.FileID)
 	if err != nil {
-		log.Printf("Failed to get file URL: %v", err)
+		log.Printf("%s Failed to get file URL: %v", tag, err)
 		return
 	}
 
-	// 2: Open an HTTP GET to the Telegram download URL
-	audioResp, err := http.Get(fileURL)
+	// 2: Download audio
+	dlClient := &http.Client{Timeout: 15 * time.Second}
+	audioResp, err := dlClient.Get(fileURL)
 	if err != nil {
-		log.Printf("Failed to download audio from telegram: %v", err)
+		log.Printf("%s Download failed: %v", tag, err)
 		return
 	}
 	defer audioResp.Body.Close()
 	if audioResp.StatusCode != http.StatusOK {
-		log.Printf("Failed to download audio, status %d", audioResp.StatusCode)
+		log.Printf("%s Download status %d", tag, audioResp.StatusCode)
 		return
 	}
 
-	// 3: Stream the Telegram audio directly to Groq STT
-	transcriptionText, err := groq.TranscribeAudio(audioResp.Body)
+	// 3: Transcribe via Groq STT
+	log.Printf("%s Transcribing (%ds)...", tag, msg.Voice.Duration)
+	text, err := groq.TranscribeAudio(audioResp.Body)
 	if err != nil {
-		log.Printf("Groq transcription failed: %v", err)
+		log.Printf("%s Transcription failed: %v", tag, err)
 		return
 	}
+	log.Printf("%s Transcription: %s", tag, text)
 
-	log.Printf("Transcription: %s", transcriptionText)
-
-	// 4: Stream text through Gemini AI, which pipes audio out as `io.ReadCloser`
-	audioStream, err := gemini.GenerateAudioStream(transcriptionText)
+	// 4: Generate voice response (text → TTS)
+	audio, answer, err := gemini.GenerateVoiceResponse(text)
 	if err != nil {
-		log.Printf("Gemini audio generation failed: %v", err)
-		return
-	}
-	defer audioStream.Close()
-
-	// 5: Stream resulting audio stream back to Telegram
-	if err := SendVoice(chatID, audioStream); err != nil {
-		log.Printf("Failed to send voice to telegram: %v", err)
+		log.Printf("%s Voice pipeline failed: %v", tag, err)
+		sendTextFallback(chatID, tag, answer, text)
 		return
 	}
 
-	log.Println("Voice message processed successfully.")
+	// 5: Send audio to Telegram
+	indicator.Stop() // stop "recording" before uploading
+	if err := SendVoice(chatID, bytes.NewReader(audio.WAVData), audio.DurationSec); err != nil {
+		log.Printf("%s Send audio failed: %v", tag, err)
+		sendTextFallback(chatID, tag, answer, text)
+		return
+	}
+	log.Printf("%s Done (%ds audio)", tag, audio.DurationSec)
+}
+
+// sendTextFallback tries to send text when audio fails.
+func sendTextFallback(chatID int64, tag, answer, originalText string) {
+	// If we got an answer from text gen, send that
+	if answer != "" {
+		if err := SendMessage(chatID, answer); err != nil {
+			log.Printf("%s Text fallback failed: %v", tag, err)
+		} else {
+			log.Printf("%s Text fallback sent", tag)
+		}
+		return
+	}
+
+	// Last resort: generate text-only
+	log.Printf("%s Last resort text generation...", tag)
+	textResp, err := gemini.GenerateTextResponse(originalText)
+	if err != nil {
+		log.Printf("%s All fallbacks failed: %v", tag, err)
+		return
+	}
+	if err := SendMessage(chatID, textResp); err != nil {
+		log.Printf("%s Send failed: %v", tag, err)
+	}
 }

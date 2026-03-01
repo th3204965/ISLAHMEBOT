@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
-	"github.com/user/islahmebot/telegram"
+	"github.com/th3204965/islahmebot/telegram"
 )
 
 func main() {

@@ -3,7 +3,7 @@ package function
 import (
 	"net/http"
 
-	"github.com/user/islahmebot/telegram"
+	"github.com/th3204965/islahmebot/telegram"
 )
 
 // MainHandler is the Google Cloud Function entry point.
