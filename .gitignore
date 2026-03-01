@@ -1,0 +1,10 @@
+.env
+vendor/
+*.exe
+*.o
+*.a
+*.obj
+*.so
+*.dylib
+*.dll
+*.class
