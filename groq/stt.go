@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+
+	"github.com/th3204965/islahmebot/httpclient"
 )
 
 var groqBaseURL = "https://api.groq.com/openai/v1"
@@ -55,8 +57,7 @@ func TranscribeAudio(ctx context.Context, audioReader io.Reader) (string, error)
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{Timeout: 0} // Timeout is governed by the context
-	resp, err := client.Do(req)
+	resp, err := httpclient.Shared.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("groq request failed: %w", err)
 	}

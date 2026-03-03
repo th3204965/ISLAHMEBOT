@@ -11,6 +11,7 @@ import (
 
 	"github.com/th3204965/islahmebot/gemini"
 	"github.com/th3204965/islahmebot/groq"
+	"github.com/th3204965/islahmebot/httpclient"
 )
 
 // HandleWebhook is the HTTP handler for Telegram webhooks.
@@ -59,8 +60,7 @@ func processVoiceMessage(ctx context.Context, msg *Message) {
 
 	// 2: Download audio
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
-	dlClient := &http.Client{Timeout: 0}
-	audioResp, err := dlClient.Do(req)
+	audioResp, err := httpclient.Shared.Do(req)
 	if err != nil {
 		slog.Error("Download failed", "chat", tag, "error", err)
 		return
@@ -80,15 +80,24 @@ func processVoiceMessage(ctx context.Context, msg *Message) {
 	}
 	slog.Info("Transcription completed", "chat", tag, "text", text)
 
-	// 4: Generate voice response (text → TTS)
-	audio, answer, err := gemini.GenerateVoiceResponse(ctx, text)
+	// 4: Generate text response (Groq Llama 3)
+	answer, err := groq.GenerateTextResponse(ctx, text)
 	if err != nil {
-		slog.Error("Voice pipeline failed", "chat", tag, "error", err)
+		slog.Error("Groq text generation failed", "chat", tag, "error", err)
+		sendTextFallback(ctx, chatID, tag, "Maaf kijiye, mujhe samajhne mein dikkat hui.", text)
+		return
+	}
+	slog.Info("Answer generated", "component", "groq", "answer", answer)
+
+	// 5: Generate voice response (Gemini TTS)
+	audio, err := gemini.GenerateAudio(ctx, answer)
+	if err != nil {
+		slog.Error("Gemini TTS failed", "chat", tag, "error", err)
 		sendTextFallback(ctx, chatID, tag, answer, text)
 		return
 	}
 
-	// 5: Send audio to Telegram
+	// 6: Send audio to Telegram
 	indicator.Stop() // stop "recording" before uploading
 	if err := SendVoice(ctx, chatID, bytes.NewReader(audio.AudioData), audio.DurationSec); err != nil {
 		slog.Error("Send audio failed", "chat", tag, "error", err)
@@ -112,7 +121,7 @@ func sendTextFallback(ctx context.Context, chatID int64, tag, answer, originalTe
 
 	// Last resort: generate text-only
 	slog.Info("Attempting last resort text generation", "chat", tag)
-	textResp, err := gemini.GenerateTextResponse(ctx, originalText)
+	textResp, err := groq.GenerateTextResponse(ctx, originalText)
 	if err != nil {
 		slog.Error("All fallbacks failed", "chat", tag, "error", err)
 		return

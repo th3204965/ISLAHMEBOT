@@ -14,23 +14,14 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/th3204965/islahmebot/httpclient"
 )
 
 const (
-	systemPrompt = `You are a respectful, warm, and comforting Islamic voice assistant.
-CRITICAL INSTRUCTION: You must respond ONLY in conversational spoken Hindustani.
-However, you MUST write your response using the English/Latin alphabet (Roman Urdu / Hinglish). 
-Example: "Aap kaise hain? Din mein paanch farz namazein hoti hain."
-Do NOT use Devanagari (अाप) or Arabic/Urdu scripts (ش). Do NOT provide English translations. Do NOT use prefixes like "Hindi:" or "Urdu:".
-Output ONLY the raw conversational Roman text that should be immediately spoken aloud directly to the user.
-Use accurate phonetic Arabic pronunciation for Islamic terms like Salah, Quran, Hadith, etc.
-Ground your answers in the Quran and Sahih Hadith. Keep responses incredibly concise (1-3 sentences maximum) for lower latency.
-If asked about an uncertain or complex Fatwa, politely decline and advise consulting a qualified Islamic scholar.`
-
 	maxRetries    = 3
 	baseBackoff   = 500 * time.Millisecond
 	ttsModel      = "gemini-2.5-flash-preview-tts"
-	textModel     = "gemini-2.5-flash"
 	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 	// PCM audio parameters (from Gemini TTS output)
@@ -49,14 +40,6 @@ type part struct {
 	Text string `json:"text"`
 }
 
-type textRequest struct {
-	SystemInstruction content   `json:"systemInstruction"`
-	Contents          []content `json:"contents"`
-	GenerationConfig  struct {
-		ResponseModalities []string `json:"responseModalities"`
-	} `json:"generationConfig"`
-}
-
 type ttsRequest struct {
 	Contents         []content `json:"contents"`
 	GenerationConfig struct {
@@ -73,16 +56,6 @@ type ttsRequest struct {
 }
 
 // --- Response types ---
-
-type textResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
-}
 
 type ttsResponse struct {
 	Candidates []struct {
@@ -103,34 +76,6 @@ type ttsResponse struct {
 type AudioResult struct {
 	AudioData   []byte
 	DurationSec int
-}
-
-// GenerateTextResponse generates a text answer using gemini-2.5-flash.
-func GenerateTextResponse(ctx context.Context, text string) (string, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		return "", fmt.Errorf("GEMINI_API_KEY is not set")
-	}
-
-	var req textRequest
-	req.SystemInstruction = content{Parts: []part{{Text: systemPrompt}}}
-	req.Contents = []content{{Parts: []part{{Text: text}}}}
-	req.GenerationConfig.ResponseModalities = []string{"TEXT"}
-
-	body, err := callGemini(ctx, apiKey, textModel, "generateContent", req)
-	if err != nil {
-		return "", err
-	}
-
-	var resp textResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", fmt.Errorf("failed to decode text response: %w", err)
-	}
-
-	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		return resp.Candidates[0].Content.Parts[0].Text, nil
-	}
-	return "", fmt.Errorf("empty text response")
 }
 
 // sanitizeForTTS replaces known problematic unicode ligatures that cause the Gemini TTS model to fail.
@@ -214,23 +159,6 @@ func encodeOggOpus(ctx context.Context, wav []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// GenerateVoiceResponse runs the full pipeline: question → text answer → TTS audio.
-// Returns audio result, answer text, and error.
-func GenerateVoiceResponse(ctx context.Context, question string) (*AudioResult, string, error) {
-	answer, err := GenerateTextResponse(ctx, question)
-	if err != nil {
-		return nil, "", fmt.Errorf("text generation failed: %w", err)
-	}
-	slog.Info("Answer generated", "component", "gemini", "answer", answer)
-
-	audio, err := GenerateAudio(ctx, answer)
-	if err != nil {
-		return nil, answer, fmt.Errorf("TTS failed: %w", err)
-	}
-
-	return audio, answer, nil
-}
-
 // --- Internal helpers ---
 
 func callGemini(ctx context.Context, apiKey, model, method string, reqBody any) ([]byte, error) {
@@ -240,7 +168,6 @@ func callGemini(ctx context.Context, apiKey, model, method string, reqBody any) 
 	}
 
 	url := fmt.Sprintf("%s/%s:%s?key=%s", geminiBaseURL, model, method, apiKey)
-	client := &http.Client{Timeout: 60 * time.Second}
 
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -256,7 +183,7 @@ func callGemini(ctx context.Context, apiKey, model, method string, reqBody any) 
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := client.Do(req)
+		resp, err := httpclient.Shared.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("request failed (attempt %d): %w", attempt+1, err)
 			continue

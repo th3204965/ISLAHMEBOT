@@ -24,8 +24,9 @@ islahmebot/
 ├── main.go                  # Cloud Run server + Health Probes
 ├── Dockerfile               # Non-Root Distroless Container
 ├── deploy.sh                # 2026 Cloud Run configuration script
-├── gemini/                  # Gemini AI pipeline + Slog json logging
-├── groq/                    # Audio streaming pipelines
+├── gemini/                  # Gemini TTS pipeline + Slog json logging
+├── groq/                    # Audio streaming and Fast Text Generation LLM
+├── httpclient/              # Global TCP Connection Pool
 └── telegram/                # Webhook router + API client
 ```
 

@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/th3204965/islahmebot/httpclient"
 )
 
 var telegramBaseURL = "https://api.telegram.org"
@@ -106,7 +108,7 @@ func SendMessage(ctx context.Context, chatID int64, text string) error {
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+	resp, err := httpclient.Shared.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -129,7 +131,7 @@ func GetFileURL(ctx context.Context, fileID string) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+	resp, err := httpclient.Shared.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("getFile failed: %w", err)
 	}
