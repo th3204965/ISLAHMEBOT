@@ -1,10 +1,51 @@
-.env
-vendor/
+# Binaries for programs and plugins
 *.exe
-*.o
-*.a
-*.obj
+*.exe~
+*.dll
 *.so
 *.dylib
-*.dll
-*.class
+bin/
+obj/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories
+vendor/
+
+# Workspace file
+go.work
+go.work.sum
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local build artifacts and logs
+test_build
+islahmebot
+main
+*.log
+
+# Local testing and temp files
+out*.json
+test_tts*

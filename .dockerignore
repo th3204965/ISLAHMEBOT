@@ -1,6 +1,3 @@
-# Files not uploaded to Google Cloud for Cloud Run source builds.
-# https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
-
 .git/
 .gitignore
 .dockerignore

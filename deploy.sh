@@ -23,22 +23,31 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$GROQ_API_KEY" ] || [ -z "$GEMINI_API_K
     exit 1
 fi
 
-echo "Deploying Cloud Function (2nd Gen) 'islahmebot'..."
+echo "Deploying Cloud Run service 'islahmebot'..."
 
-gcloud functions deploy islahmebot \
-  --gen2 \
-  --runtime=go125 \
-  --region=europe-west4 \
+gcloud run deploy islahmebot \
   --source=. \
-  --entry-point=MainHandler \
-  --trigger-http \
+  --region=europe-west4 \
   --allow-unauthenticated \
-  --set-env-vars="TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN},GROQ_API_KEY=${GROQ_API_KEY},GEMINI_API_KEY=${GEMINI_API_KEY}"
+  --set-env-vars="TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN},GROQ_API_KEY=${GROQ_API_KEY},GEMINI_API_KEY=${GEMINI_API_KEY}" \
+  --port=8080 \
+  --memory=512Mi \
+  --cpu=1 \
+  --timeout=120 \
+  --min-instances=0 \
+  --max-instances=3 \
+  --concurrency=80 \
+  --execution-environment=gen2 \
+  --cpu-boost \
+  --labels=managed-by=gcloud,tier=backend \
+  --liveness-probe=httpGet.path=/health,initialDelaySeconds=2,timeoutSeconds=5,periodSeconds=15 \
+  --startup-probe=httpGet.path=/health,initialDelaySeconds=2,timeoutSeconds=5,periodSeconds=15
 
 echo "Deployment finished."
 
-echo "Fetching deployed Cloud Function URL..."
-FUNCTION_URL=$(gcloud functions describe islahmebot --region=europe-west4 --gen2 --format="value(serviceConfig.uri)")
+echo "Fetching deployed Cloud Run URL..."
+SERVICE_URL=$(gcloud run services describe islahmebot --region=europe-west4 --format="value(status.url)")
+WEBHOOK_URL="${SERVICE_URL}/webhook"
 
-echo "Setting Telegram Webhook to: $FUNCTION_URL"
-curl -s -F "url=${FUNCTION_URL}" "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" | grep -q '"ok":true' && echo "Webhook linked successfully!" || echo "Failed to link webhook."
+echo "Setting Telegram Webhook to: $WEBHOOK_URL"
+curl -s -F "url=${WEBHOOK_URL}" "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" | grep -q '"ok":true' && echo "Webhook linked successfully!" || echo "Failed to link webhook."

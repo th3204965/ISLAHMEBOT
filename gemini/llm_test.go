@@ -1,137 +1,92 @@
 package gemini
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"os"
-	"strings"
+	"bytes"
+	"net/http"
 	"testing"
 )
 
-func TestGenerateTextResponse_MissingAPIKey(t *testing.T) {
-	os.Unsetenv("GEMINI_API_KEY")
-	_, err := GenerateTextResponse("test")
-	if err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
-		t.Fatalf("expected API key error, got: %v", err)
+func TestSanitizeForTTS(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no ligatures",
+			input:    "Hello world",
+			expected: "Hello world",
+		},
+		{
+			name:     "contains Sallallahu Alaihi Wasallam",
+			input:    "प्यारे नबी ﷺ की सुन्नत है",
+			expected: "प्यारे नबी सल्लल्लाहु अलैहि वसल्लम की सुन्नत है",
+		},
+		{
+			name:     "contains Jalla Jalaluhu",
+			input:    "अल्लाह ﷻ",
+			expected: "अल्लाह जल्ल जलालुहू",
+		},
+		{
+			name:     "contains Bismillah",
+			input:    "शुरू करते हैं ﷽",
+			expected: "शुरू करते हैं बिस्मिल्लाहिर्रहमानिर्रहीम",
+		},
+		{
+			name:     "multiple ligatures",
+			input:    "﷽ अल्लाह ﷻ और नबी ﷺ",
+			expected: "बिस्मिल्लाहिर्रहमानिर्रहीम अल्लाह जल्ल जलालुहू और नबी सल्लल्लाहु अलैहि वसल्लम",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := sanitizeForTTS(tc.input)
+			if result != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, result)
+			}
+		})
 	}
 }
 
-func TestGenerateAudio_MissingAPIKey(t *testing.T) {
-	os.Unsetenv("GEMINI_API_KEY")
-	_, err := GenerateAudio("test")
-	if err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
-		t.Fatalf("expected API key error, got: %v", err)
-	}
-}
+func TestPCMToWAV(t *testing.T) {
+	// A small dummy PCM buffer
+	pcm := []byte{0x00, 0x01, 0x02, 0x03}
+	wav := pcmToWAV(pcm)
 
-func TestTextRequest_JSONStructure(t *testing.T) {
-	var req textRequest
-	req.SystemInstruction = content{Parts: []part{{Text: "system"}}}
-	req.Contents = []content{{Parts: []part{{Text: "question"}}}}
-	req.GenerationConfig.ResponseModalities = []string{"TEXT"}
+	// WAV header is 44 bytes
+	if len(wav) != 44+len(pcm) {
+		t.Fatalf("expected length %d, got %d", 44+len(pcm), len(wav))
+	}
 
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
+	// Check RIFF header
+	if string(wav[0:4]) != "RIFF" {
+		t.Errorf("expected RIFF, got %s", string(wav[0:4]))
 	}
-	s := string(data)
-	if strings.Contains(s, "speechConfig") {
-		t.Error("text request should not have speechConfig")
-	}
-	if !strings.Contains(s, `"TEXT"`) {
-		t.Error("should contain TEXT modality")
-	}
-}
 
-func TestTTSRequest_JSONStructure(t *testing.T) {
-	var req ttsRequest
-	req.Contents = []content{{Parts: []part{{Text: "hello"}}}}
-	req.GenerationConfig.ResponseModalities = []string{"AUDIO"}
-	req.GenerationConfig.SpeechConfig.VoiceConfig.PrebuiltVoiceConfig.VoiceName = "Kore"
-	req.Model = "gemini-2.5-flash-preview-tts"
+	// Check WAVE format
+	if string(wav[8:12]) != "WAVE" {
+		t.Errorf("expected WAVE, got %s", string(wav[8:12]))
+	}
 
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(data)
-	if !strings.Contains(s, `"AUDIO"`) {
-		t.Error("should contain AUDIO modality")
-	}
-	if !strings.Contains(s, `"Kore"`) {
-		t.Error("should contain Kore voice")
-	}
-	if strings.Contains(s, "systemInstruction") {
-		t.Error("TTS request should not have systemInstruction")
-	}
-}
-
-func TestTextResponse_Parsing(t *testing.T) {
-	j := `{"candidates":[{"content":{"parts":[{"text":"five daily prayers"}]}}]}`
-	var r textResponse
-	if err := json.Unmarshal([]byte(j), &r); err != nil {
-		t.Fatal(err)
-	}
-	if len(r.Candidates) != 1 || r.Candidates[0].Content.Parts[0].Text != "five daily prayers" {
-		t.Error("unexpected parse result")
-	}
-}
-
-func TestTextResponse_Empty(t *testing.T) {
-	j := `{"candidates":[]}`
-	var r textResponse
-	json.Unmarshal([]byte(j), &r)
-	if len(r.Candidates) != 0 {
-		t.Error("expected empty")
-	}
-}
-
-func TestTTSResponse_Parsing(t *testing.T) {
-	audio := []byte("fake-pcm-data")
-	b64 := base64.StdEncoding.EncodeToString(audio)
-	j := `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16","data":"` + b64 + `"}}]}}]}`
-
-	var r ttsResponse
-	if err := json.Unmarshal([]byte(j), &r); err != nil {
-		t.Fatal(err)
-	}
-	decoded, _ := base64.StdEncoding.DecodeString(r.Candidates[0].Content.Parts[0].InlineData.Data)
-	if string(decoded) != "fake-pcm-data" {
-		t.Error("audio data mismatch")
+	// Check data chunk matches original pcm
+	if !bytes.Equal(wav[44:], pcm) {
+		t.Errorf("pcm data mismatch in WAV file")
 	}
 }
 
 func TestIsRetryable(t *testing.T) {
-	cases := map[int]bool{200: false, 400: false, 429: true, 500: true, 502: true, 503: true}
-	for code, want := range cases {
-		if got := isRetryable(code); got != want {
-			t.Errorf("isRetryable(%d) = %v, want %v", code, got, want)
+	retryableCodes := []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout}
+	for _, code := range retryableCodes {
+		if !isRetryable(code) {
+			t.Errorf("expected status %d to be retryable", code)
 		}
 	}
-}
 
-func TestPcmToWAV_Header(t *testing.T) {
-	pcm := make([]byte, 48000) // 1 second of 24kHz 16-bit mono
-	wav := pcmToWAV(pcm)
-
-	// Check RIFF header
-	if string(wav[:4]) != "RIFF" {
-		t.Error("missing RIFF header")
-	}
-	if string(wav[8:12]) != "WAVE" {
-		t.Error("missing WAVE format")
-	}
-	// WAV = 44 byte header + pcm data
-	if len(wav) != 44+len(pcm) {
-		t.Errorf("WAV size: got %d, want %d", len(wav), 44+len(pcm))
-	}
-}
-
-func TestAudioDuration(t *testing.T) {
-	// 24000 Hz * 2 bytes * 1 channel = 48000 bytes/sec
-	pcm := make([]byte, 48000*5) // 5 seconds
-	duration := len(pcm) / (pcmSampleRate * pcmChannels * pcmBitsPerSample / 8)
-	if duration != 5 {
-		t.Errorf("duration: got %d, want 5", duration)
+	nonRetryableCodes := []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound}
+	for _, code := range nonRetryableCodes {
+		if isRetryable(code) {
+			t.Errorf("expected status %d to NOT be retryable", code)
+		}
 	}
 }

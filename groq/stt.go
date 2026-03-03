@@ -1,14 +1,16 @@
 package groq
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
-	"time"
 )
+
+var groqBaseURL = "https://api.groq.com/openai/v1"
 
 // TranscriptionResponse holds the STT result from Groq.
 type TranscriptionResponse struct {
@@ -18,7 +20,7 @@ type TranscriptionResponse struct {
 // TranscribeAudio streams audio to Groq's Whisper STT and returns the transcribed text.
 // Uses io.Pipe for zero-copy streaming — the audio bytes flow directly from the
 // HTTP download into the Groq upload without buffering the entire file in memory.
-func TranscribeAudio(audioReader io.Reader) (string, error) {
+func TranscribeAudio(ctx context.Context, audioReader io.Reader) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GROQ_API_KEY is not set")
@@ -42,17 +44,18 @@ func TranscribeAudio(audioReader io.Reader) (string, error) {
 			return
 		}
 		writer.WriteField("model", "whisper-large-v3")
+		writer.WriteField("language", "hi")
 	}()
 
-	req, err := http.NewRequest(http.MethodPost,
-		"https://api.groq.com/openai/v1/audio/transcriptions", pr)
+	apiURL := fmt.Sprintf("%s/audio/transcriptions", groqBaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, pr)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 0} // Timeout is governed by the context
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("groq request failed: %w", err)

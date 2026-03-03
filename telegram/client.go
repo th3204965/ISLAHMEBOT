@@ -1,16 +1,20 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
+
+var telegramBaseURL = "https://api.telegram.org"
 
 // TypingLoop keeps a chat action indicator alive until stopped.
 type TypingLoop struct {
@@ -49,7 +53,7 @@ func (t *TypingLoop) Stop() {
 
 // SendVoice sends audio via Telegram's sendVoice API (shows as voice bubble with waveform).
 // The duration parameter ensures the correct length is displayed.
-func SendVoice(chatID int64, audioReader io.Reader, durationSec int) error {
+func SendVoice(ctx context.Context, chatID int64, audioReader io.Reader, durationSec int) error {
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
 
@@ -71,14 +75,14 @@ func SendVoice(chatID int64, audioReader io.Reader, durationSec int) error {
 		}
 	}()
 
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", os.Getenv("TELEGRAM_BOT_TOKEN"))
-	req, err := http.NewRequest(http.MethodPost, apiURL, pr)
+	apiURL := fmt.Sprintf("%s/bot%s/sendVoice", telegramBaseURL, os.Getenv("TELEGRAM_BOT_TOKEN"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, pr)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send voice: %w", err)
 	}
@@ -92,11 +96,17 @@ func SendVoice(chatID int64, audioReader io.Reader, durationSec int) error {
 }
 
 // SendMessage sends a text message.
-func SendMessage(chatID int64, text string) error {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", os.Getenv("TELEGRAM_BOT_TOKEN"))
+func SendMessage(ctx context.Context, chatID int64, text string) error {
+	apiURL := fmt.Sprintf("%s/bot%s/sendMessage", telegramBaseURL, os.Getenv("TELEGRAM_BOT_TOKEN"))
 	data := url.Values{"chat_id": {fmt.Sprintf("%d", chatID)}, "text": {text}}
 
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).PostForm(apiURL, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -110,11 +120,16 @@ func SendMessage(chatID int64, text string) error {
 }
 
 // GetFileURL fetches the download URL for a Telegram file ID.
-func GetFileURL(fileID string) (string, error) {
+func GetFileURL(ctx context.Context, fileID string) (string, error) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getFile?file_id=%s", token, fileID)
+	apiURL := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", telegramBaseURL, token, fileID)
 
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("getFile failed: %w", err)
 	}
@@ -132,15 +147,15 @@ func GetFileURL(fileID string) (string, error) {
 		return "", fmt.Errorf("getFile not ok")
 	}
 
-	return fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", token, r.Result.FilePath), nil
+	return fmt.Sprintf("%s/file/bot%s/%s", telegramBaseURL, token, r.Result.FilePath), nil
 }
 
 func sendChatAction(chatID int64, action string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendChatAction", os.Getenv("TELEGRAM_BOT_TOKEN"))
+	apiURL := fmt.Sprintf("%s/bot%s/sendChatAction", telegramBaseURL, os.Getenv("TELEGRAM_BOT_TOKEN"))
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).PostForm(apiURL,
 		url.Values{"chat_id": {fmt.Sprintf("%d", chatID)}, "action": {action}})
 	if err != nil {
-		log.Printf("[telegram] sendChatAction failed: %v", err)
+		slog.Error("sendChatAction failed", "component", "telegram", "error", err)
 		return
 	}
 	resp.Body.Close()

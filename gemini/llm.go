@@ -2,23 +2,29 @@ package gemini
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 )
 
 const (
 	systemPrompt = `You are a respectful, warm, and comforting Islamic voice assistant.
-Respond in natural Hindustani — a mix of Hindi and Urdu as spoken by Indian Muslims. Use Devanagari script for text.
-Use accurate Arabic pronunciation for Islamic terms like Salah, Quran, Hadith, etc.
-Ground your answers in the Quran and Sahih Hadith.
-Keep responses concise (2-4 sentences) since they will be spoken aloud.
+CRITICAL INSTRUCTION: You must respond ONLY in conversational spoken Hindustani.
+However, you MUST write your response using the English/Latin alphabet (Roman Urdu / Hinglish). 
+Example: "Aap kaise hain? Din mein paanch farz namazein hoti hain."
+Do NOT use Devanagari (अाप) or Arabic/Urdu scripts (ش). Do NOT provide English translations. Do NOT use prefixes like "Hindi:" or "Urdu:".
+Output ONLY the raw conversational Roman text that should be immediately spoken aloud directly to the user.
+Use accurate phonetic Arabic pronunciation for Islamic terms like Salah, Quran, Hadith, etc.
+Ground your answers in the Quran and Sahih Hadith. Keep responses incredibly concise (1-3 sentences maximum) for lower latency.
 If asked about an uncertain or complex Fatwa, politely decline and advise consulting a qualified Islamic scholar.`
 
 	maxRetries    = 3
@@ -95,12 +101,12 @@ type ttsResponse struct {
 
 // AudioResult holds the WAV audio bytes and duration.
 type AudioResult struct {
-	WAVData     []byte
+	AudioData   []byte
 	DurationSec int
 }
 
 // GenerateTextResponse generates a text answer using gemini-2.5-flash.
-func GenerateTextResponse(text string) (string, error) {
+func GenerateTextResponse(ctx context.Context, text string) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY is not set")
@@ -111,7 +117,7 @@ func GenerateTextResponse(text string) (string, error) {
 	req.Contents = []content{{Parts: []part{{Text: text}}}}
 	req.GenerationConfig.ResponseModalities = []string{"TEXT"}
 
-	body, err := callGemini(apiKey, textModel, "generateContent", req)
+	body, err := callGemini(ctx, apiKey, textModel, "generateContent", req)
 	if err != nil {
 		return "", err
 	}
@@ -127,20 +133,36 @@ func GenerateTextResponse(text string) (string, error) {
 	return "", fmt.Errorf("empty text response")
 }
 
+// sanitizeForTTS replaces known problematic unicode ligatures that cause the Gemini TTS model to fail.
+func sanitizeForTTS(text string) string {
+	replacements := map[string]string{
+		"ﷺ": "सल्लल्लाहु अलैहि वसल्लम",    // Sallallahu Alaihi Wasallam
+		"ﷻ": "जल्ल जलालुहू",               // Jalla Jalaluhu
+		"﷽": "बिस्मिल्लाहिर्रहमानिर्रहीम", // Bismillah
+	}
+	sanitized := text
+	for ligature, replacement := range replacements {
+		sanitized = strings.ReplaceAll(sanitized, ligature, replacement)
+	}
+	return sanitized
+}
+
 // GenerateAudio converts text to speech and returns WAV audio with duration.
-func GenerateAudio(text string) (*AudioResult, error) {
+func GenerateAudio(ctx context.Context, text string) (*AudioResult, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY is not set")
 	}
 
+	sanitizedText := sanitizeForTTS(text)
+
 	var req ttsRequest
-	req.Contents = []content{{Parts: []part{{Text: text}}}}
+	req.Contents = []content{{Parts: []part{{Text: sanitizedText}}}}
 	req.GenerationConfig.ResponseModalities = []string{"AUDIO"}
 	req.GenerationConfig.SpeechConfig.VoiceConfig.PrebuiltVoiceConfig.VoiceName = "Kore"
 	req.Model = ttsModel
 
-	body, err := callGemini(apiKey, ttsModel, "generateContent", req)
+	body, err := callGemini(ctx, apiKey, ttsModel, "generateContent", req)
 	if err != nil {
 		return nil, err
 	}
@@ -167,19 +189,41 @@ func GenerateAudio(text string) (*AudioResult, error) {
 	wav := pcmToWAV(pcm)
 	duration := len(pcm) / (pcmSampleRate * pcmChannels * pcmBitsPerSample / 8)
 
-	return &AudioResult{WAVData: wav, DurationSec: duration}, nil
+	ogg, err := encodeOggOpus(ctx, wav)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode to ogg: %w", err)
+	}
+
+	return &AudioResult{AudioData: ogg, DurationSec: duration}, nil
+}
+
+func encodeOggOpus(ctx context.Context, wav []byte) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "pipe:1")
+	cmd.Stdin = bytes.NewReader(wav)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg failed: %w, stderr: %s", err, stderr.String())
+	}
+
+	return out.Bytes(), nil
 }
 
 // GenerateVoiceResponse runs the full pipeline: question → text answer → TTS audio.
 // Returns audio result, answer text, and error.
-func GenerateVoiceResponse(question string) (*AudioResult, string, error) {
-	answer, err := GenerateTextResponse(question)
+func GenerateVoiceResponse(ctx context.Context, question string) (*AudioResult, string, error) {
+	answer, err := GenerateTextResponse(ctx, question)
 	if err != nil {
 		return nil, "", fmt.Errorf("text generation failed: %w", err)
 	}
-	log.Printf("[gemini] Answer: %s", answer)
+	slog.Info("Answer generated", "component", "gemini", "answer", answer)
 
-	audio, err := GenerateAudio(answer)
+	audio, err := GenerateAudio(ctx, answer)
 	if err != nil {
 		return nil, answer, fmt.Errorf("TTS failed: %w", err)
 	}
@@ -189,7 +233,7 @@ func GenerateVoiceResponse(question string) (*AudioResult, string, error) {
 
 // --- Internal helpers ---
 
-func callGemini(apiKey, model, method string, reqBody any) ([]byte, error) {
+func callGemini(ctx context.Context, apiKey, model, method string, reqBody any) ([]byte, error) {
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -202,11 +246,11 @@ func callGemini(apiKey, model, method string, reqBody any) ([]byte, error) {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := baseBackoff * time.Duration(1<<(attempt-1))
-			log.Printf("[gemini] Retry %d/%d after %v", attempt+1, maxRetries, backoff)
+			slog.Warn("Retrying gemini request", "component", "gemini", "attempt", attempt+1, "max_retries", maxRetries, "backoff", backoff)
 			time.Sleep(backoff)
 		}
 
-		req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -229,14 +273,14 @@ func callGemini(apiKey, model, method string, reqBody any) ([]byte, error) {
 		if !isRetryable(resp.StatusCode) {
 			return nil, lastErr
 		}
-		log.Printf("[gemini] Transient error %d (attempt %d/%d)", resp.StatusCode, attempt+1, maxRetries)
+		slog.Warn("Transient gemini error", "component", "gemini", "status", resp.StatusCode, "attempt", attempt+1)
 	}
 
 	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
 }
 
 func isRetryable(code int) bool {
-	return code == 429 || code == 500 || code == 502 || code == 503
+	return code == 429 || code == 500 || code == 502 || code == 503 || code == 504
 }
 
 func pcmToWAV(pcm []byte) []byte {
