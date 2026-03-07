@@ -45,7 +45,7 @@ func TranscribeAudio(ctx context.Context, audioReader io.Reader) (string, error)
 			pw.CloseWithError(err)
 			return
 		}
-		writer.WriteField("model", "whisper-large-v3")
+		writer.WriteField("model", "whisper-large-v3-turbo")
 		writer.WriteField("language", "hi")
 	}()
 

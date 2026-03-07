@@ -5,11 +5,11 @@ A voice-in/voice-out Telegram bot that answers Islamic questions. Send a voice m
 ## How It Works
 
 ```
-Voice Message → Groq Whisper STT → Gemini 2.5 Flash (text) → Gemini TTS (speech) → Audio Response
+Voice Message → Groq Whisper STT → Groq Llama 3 (text) → Gemini TTS (speech) → Audio Response
 ```
 
-1. **Transcription** — [Groq Whisper](https://groq.com/) (`whisper-large-v3`) converts the voice message to text
-2. **Answer Generation** — [Gemini 2.5 Flash](https://ai.google.dev/) generates a concise Hindi answer
+1. **Transcription** — [Groq Whisper](https://groq.com/) (`whisper-large-v3-turbo`) converts the voice message to text
+2. **Answer Generation** — [Groq Llama 3](https://groq.com/) generates a concise Hindi answer
 3. **Text-to-Speech** — [Gemini TTS](https://ai.google.dev/gemini-api/docs/speech-generation) converts the answer to audio
 4. **Delivery** — Audio is sent back as a Telegram audio message with correct title and duration
 
@@ -66,7 +66,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<NGROK_URL>/webhook"
 ```
 
 ### Running Tests
-The project features comprehensive table-driven unit tests leveraging `httptest` mock servers to validate core AI logic without executing external API calls.
+The project features comprehensive table-driven unit tests leveraging `httptest` mock servers to validate core AI logic (including STT and LLM generation) without executing external API calls.
 ```bash
 go test -v ./...
 ```
@@ -90,8 +90,8 @@ Deploys as a Cloud Run service to `europe-west4` using source-based builds and c
 
 | Service | Model | Purpose |
 |---------|-------|---------|
-| Groq | `whisper-large-v3` | Speech-to-text |
-| Gemini | `gemini-2.5-flash` | Text answer generation |
+| Groq | `whisper-large-v3-turbo` | Speech-to-text |
+| Groq | `llama-3.1-8b-instant` | Text answer generation |
 | Gemini | `gemini-2.5-flash-preview-tts` | Text-to-speech (Kore voice) |
 
 ## License

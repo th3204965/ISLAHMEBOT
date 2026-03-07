@@ -42,7 +42,7 @@ func GenerateTextResponse(ctx context.Context, text string) (string, error) {
 	}
 
 	reqBody := Request{
-		Model: "llama-3.3-70b-versatile",
+		Model: "llama-3.1-8b-instant",
 		Messages: []Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: text},
