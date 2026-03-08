@@ -35,15 +35,21 @@ func TestMemoryCache(t *testing.T) {
 		t.Errorf("Unexpected message 1: %+v", msgs[1])
 	}
 
-	// Test max length eviction (maxLen is 4)
+	// Test max length eviction (maxLen is 10)
 	h.AddMessage("user", "Q1")
 	h.AddMessage("assistant", "A1")
 	h.AddMessage("user", "Q2")
 	h.AddMessage("assistant", "A2")
+	h.AddMessage("user", "Q3")
+	h.AddMessage("assistant", "A3")
+	h.AddMessage("user", "Q4")
+	h.AddMessage("assistant", "A4")
+	h.AddMessage("user", "Q5")
+	h.AddMessage("assistant", "A5")
 
 	msgs = h.GetMessages()
-	if len(msgs) != 4 {
-		t.Fatalf("Expected strictly 4 messages due to maxLen, got %d", len(msgs))
+	if len(msgs) != 10 {
+		t.Fatalf("Expected strictly 10 messages due to maxLen, got %d", len(msgs))
 	}
 
 	// The first two "Hello" and "Hi there" should be evicted
@@ -52,6 +58,12 @@ func TestMemoryCache(t *testing.T) {
 		{Role: "assistant", Content: "A1"},
 		{Role: "user", Content: "Q2"},
 		{Role: "assistant", Content: "A2"},
+		{Role: "user", Content: "Q3"},
+		{Role: "assistant", Content: "A3"},
+		{Role: "user", Content: "Q4"},
+		{Role: "assistant", Content: "A4"},
+		{Role: "user", Content: "Q5"},
+		{Role: "assistant", Content: "A5"},
 	}
 
 	if !reflect.DeepEqual(msgs, expected) {

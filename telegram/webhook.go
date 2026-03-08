@@ -33,10 +33,10 @@ func HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 55 second strict timeout logic. Cloud Run drops the connection at 60s.
+	// 110 second strict timeout logic. Cloud Run drops the connection at 120s.
 	// We want to force-cancel outgoing API requests slightly before the infrastructure executes a SIGKILL
 	// to allow graceful error logging and text fallback attempts if possible.
-	ctx, cancel := context.WithTimeout(r.Context(), 55*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 110*time.Second)
 	defer cancel()
 
 	processVoiceMessage(ctx, update.Message)

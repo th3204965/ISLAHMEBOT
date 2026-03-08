@@ -30,8 +30,8 @@ func getHistory(chatID int64) *ConversationHistory {
 	val, ok := memCache.Load(chatID)
 	if !ok {
 		h := &ConversationHistory{
-			messages: make([]Message, 0, 4),
-			maxLen:   4, // Keep the last 4 messages in context (~2 full turns)
+			messages: make([]Message, 0, 10),
+			maxLen:   10, // Keep the last 10 messages in context (~5 full turns)
 		}
 		memCache.Store(chatID, h)
 		return h

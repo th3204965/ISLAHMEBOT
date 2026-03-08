@@ -35,9 +35,8 @@ func main() {
 	mux.HandleFunc("/webhook", telegram.HandleWebhook)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
 	})
-
+	// 120s timeouts sync strictly with Cloud Run gateway limit
 	server := &http.Server{
 		Addr:         ":" + port,
 		Handler:      mux,
