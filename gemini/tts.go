@@ -95,8 +95,8 @@ func sanitizeForTTS(text string) string {
 	return sanitized
 }
 
-// GeneratePCM converts text to speech and returns raw PCM audio bytes.
-func GeneratePCM(ctx context.Context, text string) ([]byte, error) {
+// GenerateAudio converts text to speech and returns WAV audio with duration.
+func GenerateAudio(ctx context.Context, text string) (*AudioResult, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY is not set")
@@ -132,15 +132,6 @@ func GeneratePCM(ctx context.Context, text string) ([]byte, error) {
 	pcm, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 audio: %w", err)
-	}
-
-	return pcm, nil
-}
-
-// EncodePCMToOggOpus takes raw PCM bytes, calculates duration, converts to WAV, and encodes to Ogg Opus.
-func EncodePCMToOggOpus(ctx context.Context, pcm []byte) (*AudioResult, error) {
-	if len(pcm) == 0 {
-		return nil, fmt.Errorf("empty pcm bytes")
 	}
 
 	wav := pcmToWAV(pcm)

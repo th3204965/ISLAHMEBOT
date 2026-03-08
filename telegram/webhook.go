@@ -80,21 +80,8 @@ func processVoiceMessage(ctx context.Context, msg *Message) {
 	}
 	slog.Info("Transcription completed", "chat", tag, "text", text)
 
-	// 4: Generate text response (Groq Llama 3) with Asynchronous TTS Streaming
-	var audioChunks []chan []byte
-	onSentence := func(sentence string) {
-		ch := make(chan []byte, 1)
-		audioChunks = append(audioChunks, ch)
-		go func(s string, c chan []byte) {
-			pcm, err := gemini.GeneratePCM(ctx, s)
-			if err != nil {
-				slog.Error("TTS stream chunk failed", "chat", tag, "error", err, "sentence", s)
-			}
-			c <- pcm
-		}(sentence, ch)
-	}
-
-	answer, err := groq.GenerateTextStream(ctx, chatID, text, onSentence)
+	// 4: Generate text response (Groq Llama 3)
+	answer, err := groq.GenerateTextResponse(ctx, chatID, text)
 	if err != nil {
 		slog.Error("Groq text generation failed", "chat", tag, "error", err)
 		sendTextFallback(ctx, chatID, tag, "Maaf kijiye, mujhe samajhne mein dikkat hui.", text)
@@ -102,25 +89,10 @@ func processVoiceMessage(ctx context.Context, msg *Message) {
 	}
 	slog.Info("Answer generated", "component", "groq", "answer", answer)
 
-	// Wait for all audio chunk pipelines to complete, preserving original sentence order
-	var finalPCM []byte
-	for _, ch := range audioChunks {
-		pcm := <-ch
-		if len(pcm) > 0 {
-			finalPCM = append(finalPCM, pcm...)
-		}
-	}
-
-	if len(finalPCM) == 0 {
-		slog.Error("All TTS chunks completely failed", "chat", tag)
-		sendTextFallback(ctx, chatID, tag, answer, text)
-		return
-	}
-
-	// 5: Transcode aggregated PCM to final Ogg Opus
-	audio, err := gemini.EncodePCMToOggOpus(ctx, finalPCM)
+	// 5: Generate voice response (Gemini TTS)
+	audio, err := gemini.GenerateAudio(ctx, answer)
 	if err != nil {
-		slog.Error("Final audio compression failed", "chat", tag, "error", err)
+		slog.Error("Gemini TTS failed", "chat", tag, "error", err)
 		sendTextFallback(ctx, chatID, tag, answer, text)
 		return
 	}
@@ -149,7 +121,7 @@ func sendTextFallback(ctx context.Context, chatID int64, tag, answer, originalTe
 
 	// Last resort: generate text-only
 	slog.Info("Attempting last resort text generation", "chat", tag)
-	textResp, err := groq.GenerateTextStream(ctx, chatID, originalText, func(string) {})
+	textResp, err := groq.GenerateTextResponse(ctx, chatID, originalText)
 	if err != nil {
 		slog.Error("All fallbacks failed", "chat", tag, "error", err)
 		return

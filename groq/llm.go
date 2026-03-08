@@ -1,7 +1,6 @@
 package groq
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/th3204965/islahmebot/httpclient"
 )
@@ -26,8 +24,9 @@ CRITICAL FOR VOICE NATURALNESS: To make the text-to-speech engine sound incredib
 Ground your answers in the Quran and Sahih Hadith. Keep responses incredibly concise (1-3 sentences maximum) for lower latency.
 If asked about an uncertain or complex Fatwa, politely decline and advise consulting a qualified Islamic scholar.`
 
-// GenerateTextStream uses Groq's Llama 3.3 70B to generate text and streams complete sentences back via a callback.
-func GenerateTextStream(ctx context.Context, chatID int64, text string, onSentence func(string)) (string, error) {
+// GenerateTextResponse uses Groq's Llama 3.3 70B to generate an almost instantaneous text response.
+// It retrieves the conversational context based on the chatID before firing the completion request.
+func GenerateTextResponse(ctx context.Context, chatID int64, text string) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GROQ_API_KEY is not set")
@@ -38,15 +37,13 @@ func GenerateTextStream(ctx context.Context, chatID int64, text string, onSenten
 	type Request struct {
 		Model    string    `json:"model"`
 		Messages []Message `json:"messages"`
-		Stream   bool      `json:"stream"`
 	}
 
 	h := getHistory(chatID)
 	h.AddMessage("user", text)
 
 	reqBody := Request{
-		Model:  "llama-3.3-70b-versatile",
-		Stream: true,
+		Model: "llama-3.3-70b-versatile",
 	}
 
 	finalMessages := []Message{{Role: "system", Content: systemPrompt}}
@@ -77,72 +74,23 @@ func GenerateTextStream(ctx context.Context, chatID int64, text string, onSenten
 		return "", fmt.Errorf("groq llm error %d: %s", resp.StatusCode, string(body))
 	}
 
-	reader := bufio.NewReader(resp.Body)
-	var fullResponse strings.Builder
-	var buffer strings.Builder
-
-	flushBuffer := func(force bool) {
-		str := strings.TrimSpace(buffer.String())
-		if str != "" {
-			if force || strings.ContainsAny(str, ".?!|\n") {
-				onSentence(str)
-				buffer.Reset()
-			}
-		}
+	var res struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return "", fmt.Errorf("error reading stream: %w", err)
-		}
-
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		if !bytes.HasPrefix(line, []byte("data: ")) {
-			continue
-		}
-
-		data := bytes.TrimPrefix(line, []byte("data: "))
-		if string(data) == "[DONE]" {
-			break
-		}
-
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			continue // skip bad chunks
-		}
-
-		if len(chunk.Choices) > 0 {
-			content := chunk.Choices[0].Delta.Content
-			if content != "" {
-				fullResponse.WriteString(content)
-				buffer.WriteString(content)
-
-				// If the incoming text contains a major sentence boundary, flush it.
-				if strings.ContainsAny(content, ".?!\n") {
-					flushBuffer(false)
-				}
-			}
-		}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", fmt.Errorf("failed to decode groq llm response: %w", err)
 	}
 
-	flushBuffer(true) // flush anything remaining
+	if len(res.Choices) == 0 {
+		return "", fmt.Errorf("empty groq llm response")
+	}
 
-	answer := fullResponse.String()
+	answer := res.Choices[0].Message.Content
 	h.AddMessage("assistant", answer)
 
 	return answer, nil

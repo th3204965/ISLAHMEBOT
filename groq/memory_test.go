@@ -10,7 +10,7 @@ func TestMemoryCache(t *testing.T) {
 
 	// Ensure clear starts us fresh
 	ClearHistory(chatID)
-	
+
 	h := getHistory(chatID)
 	if h == nil {
 		t.Fatal("Expected history to be initialized, got nil")
@@ -60,7 +60,7 @@ func TestMemoryCache(t *testing.T) {
 
 	// Test ClearHistory
 	ClearHistory(chatID)
-	
+
 	h2 := getHistory(chatID)
 	if len(h2.GetMessages()) != 0 {
 		t.Fatalf("Expected history to be empty after clear, got %d", len(h2.GetMessages()))

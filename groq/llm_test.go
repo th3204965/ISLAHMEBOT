@@ -18,10 +18,15 @@ func TestGenerateTextResponse(t *testing.T) {
 			t.Errorf("Expected POST, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data: {\"choices\": [{\"delta\": {\"content\": \"Assalamu \"}}]}\n\n"))
-		w.Write([]byte("data: {\"choices\": [{\"delta\": {\"content\": \"alaikum. \"}}]}\n\n"))
-		w.Write([]byte("data: {\"choices\": [{\"delta\": {\"content\": \"Aap kaise hain?\"}}]}\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
+		w.Write([]byte(`{
+			"choices": [
+				{
+					"message": {
+						"content": "Assalamu alaikum. Aap kaise hain?"
+					}
+				}
+			]
+		}`))
 	}))
 	defer ts.Close()
 
@@ -30,7 +35,7 @@ func TestGenerateTextResponse(t *testing.T) {
 	groqBaseURL = ts.URL
 	defer func() { groqBaseURL = originalBaseURL }()
 
-	text, err := GenerateTextStream(context.Background(), 12345, "Salam", func(string) {})
+	text, err := GenerateTextResponse(context.Background(), 12345, "Salam")
 	if err != nil {
 		t.Fatalf("GenerateTextResponse failed: %v", err)
 	}
@@ -53,7 +58,7 @@ func TestGenerateTextResponse_Error(t *testing.T) {
 	groqBaseURL = ts.URL
 	defer func() { groqBaseURL = originalBaseURL }()
 
-	_, err := GenerateTextStream(context.Background(), 12345, "Salam", func(string) {})
+	_, err := GenerateTextResponse(context.Background(), 12345, "Salam")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -66,8 +71,7 @@ func TestGenerateTextResponse_Error(t *testing.T) {
 func TestGenerateTextResponse_EmptyChoices(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data: {\"choices\": []}\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
+		w.Write([]byte(`{"choices": []}`))
 	}))
 	defer ts.Close()
 
@@ -76,12 +80,12 @@ func TestGenerateTextResponse_EmptyChoices(t *testing.T) {
 	groqBaseURL = ts.URL
 	defer func() { groqBaseURL = originalBaseURL }()
 
-	text, err := GenerateTextStream(context.Background(), 12345, "Salam", func(string) {})
-	if err != nil {
-		t.Fatalf("Expected nil error, got %v", err)
+	_, err := GenerateTextResponse(context.Background(), 12345, "Salam")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
 	}
 
-	if text != "" {
-		t.Errorf("Expected empty string, got %s", text)
+	if !strings.Contains(err.Error(), "empty groq llm response") {
+		t.Errorf("Unexpected error message: %v", err)
 	}
 }

@@ -42,7 +42,6 @@ islahmebot/
 - **Native Telegram Voice Waveforms**: Statically compiled `ffmpeg` is securely injected into the distroless runtime. Raw Go audio streams are instantly transcoded in-memory to OGG Opus via `os/exec` before Telegram upload, natively triggering gorgeous voice-note UI waveforms.
 - **Ultra-Low Latency TTS Hack**: The AI's `systemPrompt` explicitly enforces Romanized Urdu/Hinglish instead of Devanagari. Relying on Latin string generation slashes the Token Time-to-First-Byte (TTFB) and accelerates the Gemini Text-to-Speech synthesis pipeline by over 40%.
 - **Zero-Disk I/O** — All audio streams concurrently via `io.Pipe`. Zero temp files are ever written to the container's disk space.
-- **Asynchronous Audio Streaming** — Groq LLM generations are consumed via Server-Sent Events (SSE). The second a sentence boundary is generated, it is instantly fired off to Gemini TTS via parallel goroutines. All audio chunks are generated simultaneously during the AI's "thinking time", slashing TTS latency by ~40%.
 - **Zero-Dependency Context Memory** — Implements a highly optimized, native Go `sync.Map` LRU cache to supply rolling conversation history bounded by Telegram `chatID`. Achieves deep conversational awareness without breaching Cloud Run's strict 512Mi minimum threshold or requiring external Redis instances.
 - **Fail-Safe TTS Piping** — Automatically scrubs unprocessable Unicode characters and Arabic ligatures (e.g., ﷺ) to completely eliminate Gemini TTS API failures and guarantee reliable streaming audio.
 
