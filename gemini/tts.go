@@ -19,6 +19,9 @@ import (
 )
 
 const (
+	// VoiceName is the selected actor voice for the Gemini TTS (Kore, Aoede, Charon, Fenrir, Puck).
+	VoiceName = "Kore"
+
 	maxRetries    = 3
 	baseBackoff   = 500 * time.Millisecond
 	ttsModel      = "gemini-2.5-flash-preview-tts"
@@ -92,8 +95,8 @@ func sanitizeForTTS(text string) string {
 	return sanitized
 }
 
-// GenerateAudio converts text to speech and returns WAV audio with duration.
-func GenerateAudio(ctx context.Context, text string) (*AudioResult, error) {
+// GeneratePCM converts text to speech and returns raw PCM audio bytes.
+func GeneratePCM(ctx context.Context, text string) ([]byte, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY is not set")
@@ -104,7 +107,7 @@ func GenerateAudio(ctx context.Context, text string) (*AudioResult, error) {
 	var req ttsRequest
 	req.Contents = []content{{Parts: []part{{Text: sanitizedText}}}}
 	req.GenerationConfig.ResponseModalities = []string{"AUDIO"}
-	req.GenerationConfig.SpeechConfig.VoiceConfig.PrebuiltVoiceConfig.VoiceName = "Kore"
+	req.GenerationConfig.SpeechConfig.VoiceConfig.PrebuiltVoiceConfig.VoiceName = VoiceName
 	req.Model = ttsModel
 
 	body, err := callGemini(ctx, apiKey, ttsModel, "generateContent", req)
@@ -129,6 +132,15 @@ func GenerateAudio(ctx context.Context, text string) (*AudioResult, error) {
 	pcm, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 audio: %w", err)
+	}
+
+	return pcm, nil
+}
+
+// EncodePCMToOggOpus takes raw PCM bytes, calculates duration, converts to WAV, and encodes to Ogg Opus.
+func EncodePCMToOggOpus(ctx context.Context, pcm []byte) (*AudioResult, error) {
+	if len(pcm) == 0 {
+		return nil, fmt.Errorf("empty pcm bytes")
 	}
 
 	wav := pcmToWAV(pcm)
