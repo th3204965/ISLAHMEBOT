@@ -69,7 +69,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<NGROK_URL>/webhook"
 ### Running Tests and Linters
 The project features comprehensive table-driven unit tests leveraging `httptest` mock servers to validate core AI logic (including STT and LLM generation) without executing external API calls. 
 
-The codebase is strictly statically analyzed (`staticcheck` and `go vet`) to ensure zero dead code or memory leaks, and formatted with `go fmt`.
+The codebase is strictly statically analyzed (`staticcheck`, `goimports`, and `go vet`) to ensure zero dead code, orphaned imports, unused files, or memory leaks exist, and formatted completely with `go fmt`.
 
 ```bash
 # Run all tests
