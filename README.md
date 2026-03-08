@@ -34,7 +34,7 @@ islahmebot/
 - **Gen 2 Execution Environment**: Full Linux compatibility, faster network I/O, and optimal memory management using the strict 512Mi minimum RAM requirement.
 - **CPU Boosting**: Dramatically accelerates the serverless container boot time to eliminate cold starts.
 - **Aggressive Timeout Synchronization**: The Go `http.Server`'s Read/Write/Idle timeouts are precisely hardcoded to 120 seconds to perfectly sync with the Cloud Run gateway expiration, entirely eliminating memory leaks from zombie requests.
-- **Strict Network Contexts**: All outbound API requests (Gemini, Groq, Telegram) are forcefully bound by a strict 55-second `context.Context` cutoff. If an AI endpoint stalls, the connection is instantly killed 5 seconds before the infrastructure teardown, guaranteeing enough time to send an emergency fallback text to the user.
+- **Strict Network Contexts**: All outbound API requests (Gemini, Groq, Telegram) are forcefully bound by a strict 110-second `context.Context` cutoff. If an AI endpoint stalls, the connection is instantly killed 10 seconds before the infrastructure teardown, guaranteeing enough time to send an emergency fallback text to the user.
 - **Tuned AI Probes**: The `/health` endpoint is wired to Cloud Run's Liveness/Startup probes with advanced tolerances (`timeout=5s`, `period=15s`). This grants the container leniency during heavy CPU Audio Inference loops without triggering false-positive instance restarts.
 - **Structured JSON Logging**: Completely migrated to `log/slog`. All application output is ingested by GCP Logs Explorer as indexable JSON.
 - **Hardened Security**: The distroless Docker image strictly executes as the `nonroot:nonroot` user, dropping all excessive Linux capabilities. A highly perfected `.dockerignore` / `.gcloudignore` suite ensures the deployment context remains completely pristine—with 100% of test files excluded.
@@ -42,7 +42,7 @@ islahmebot/
 - **Native Telegram Voice Waveforms**: Statically compiled `ffmpeg` is securely injected into the distroless runtime. Raw Go audio streams are instantly transcoded in-memory to OGG Opus via `os/exec` before Telegram upload, natively triggering gorgeous voice-note UI waveforms.
 - **Ultra-Low Latency TTS Hack**: The AI's `systemPrompt` explicitly enforces Romanized Urdu/Hinglish instead of Devanagari. Relying on Latin string generation slashes the Token Time-to-First-Byte (TTFB) and accelerates the Gemini Text-to-Speech synthesis pipeline by over 40%.
 - **Zero-Disk I/O** — All audio streams concurrently via `io.Pipe`. Zero temp files are ever written to the container's disk space.
-- **Zero-Dependency Context Memory** — Implements a highly optimized, native Go `sync.Map` LRU cache to supply rolling conversation history bounded by Telegram `chatID`. Achieves deep conversational awareness without breaching Cloud Run's strict 512Mi minimum threshold or requiring external Redis instances.
+- **Extended Context Memory** — Implements a highly optimized, native Go `sync.Map` LRU cache to supply rolling conversation history bounded by Telegram `chatID`. The bot seamlessly retains the last 10 interactions (~5 full questions & answers). Achieves deep conversational awareness without breaching Cloud Run's strict 512Mi minimum threshold or requiring external Redis instances.
 - **Fail-Safe TTS Piping** — Automatically scrubs unprocessable Unicode characters and Arabic ligatures (e.g., ﷺ) to completely eliminate Gemini TTS API failures and guarantee reliable streaming audio.
 
 ## Prerequisites
